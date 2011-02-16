@@ -193,6 +193,8 @@ def get_all_factors(database, query):
     return [*transposed_factors, *transposed_num]
 
 
+from datetime import datetime, timedelta
+
 def generate_future_dates(date_string, num_steps):
     formats = ["%d-%m-%Y", "%m-%Y", "%Y"]  # Supported date formats
 
@@ -214,7 +216,7 @@ def generate_future_dates(date_string, num_steps):
     for _ in range(num_steps):
         future_dates.append(date.strftime(date_format))
         if date_format == "%Y":
-            date = date + timedelta(days=1)
+            date = date.replace(year=date.year + 1)  # Increment the year by one
         elif date_format == "%m-%Y":
             if date.month == 12:
                 date = date.replace(year=date.year + 1, month=1)
