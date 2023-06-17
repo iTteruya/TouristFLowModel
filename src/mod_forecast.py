@@ -1,15 +1,13 @@
 import PySimpleGUI as sg
 
 trans_infr = ["Публичный транспорт", "Арендованный транспорт", "Транспортная развязка",
-              "Водный транспорт", "Подземный транспорт", "Наземный транспорт", "Такси", "Цена", "Общая оценка"]
+              "Водный транспорт", "Подземный транспорт", "Наземный транспорт", "Такси", "Трансфер", "Цена"]
 acc_seg = ["Тип жилья", "Потребительская инфраструктура", "Дом", "Квартира", "Отель", "Гостиница",
-           "Кемпинг", "Зеленая территория", "Медицинские учреждения", "Торговые центры",
-           "Класс района", "Цена", "Общая оценка"]
+           "Кемпинг", "Зеленая территория", "Медицинские учреждения", "Торговые центры", "Класс района", "Цена"]
 food_seg = ["Исторические ландшафты", "Природные особенности", "Спорт., муз. и др. мероприятия",
-            "Оздоровительный отдых", "Шопинг", "Уникальные объекты", "Уникальные зоны", "Общая оценка"]
-rr = ["Продукты", "Местные заведения", "Тип заведения", "Цена", "Разнообразие",
-      "Национальные особенности", "Общая оценка"]
-other = ["Визовые сборы", "Популярный курорт", "Природные факторы", "Количество туристов", "Общая оценка"]
+            "Оздоровительный отдых", "Шопинг", "Уникальные объекты", "Уникальные зоны"]
+rr = ["Продукты", "Местные заведения", "Тип заведения", "Цена", "Разнообразие", "Национальные особенности"]
+other = ["Визовые сборы", "Популярный курорт", "Природные факторы", "Количество туристов"]
 num_value = ["Кол-во отелей", "Кол-во гостиниц", "Кол-во ресторанов", "Кол-во ТЦ", "Кол-во мед. учр.",
              "Кол-во санаториев", "Цена продуктов"]
 
@@ -65,20 +63,20 @@ class SetupForecast:
                 current_section = section
                 self.layout.append([sg.Text(section, font='Helvetica 12 bold')])
 
-            checkbox = sg.Checkbox('', default=use_checkbox, key=f'use_{i}', enable_events=True)
+            checkbox = sg.Checkbox('', default=not use_checkbox, key=f'use_{i}', enable_events=True)
             self.checkbox_elements.append(checkbox)
 
             input_element = sg.Input(default_text='' if value is None else str(value), key=name, size=(10, 1),
-                                     disabled=not use_checkbox)
+                                     disabled=use_checkbox)
             self.input_elements.append(input_element)
 
             combo_element = sg.Combo(options, default_value=selected_option, key=f'option_{i}',
-                                     disabled=not use_checkbox)
+                                     disabled=use_checkbox)
             self.combo_elements.append(combo_element)
 
             delta_input_element = sg.Input(default_text='' if delta_value is None else str(delta_value),
                                            key=f'delta_{i}',
-                                           disabled=not use_checkbox, size=(10, 1))
+                                           disabled=use_checkbox, size=(10, 1))
             self.delta_input_elements.append(delta_input_element)
 
             self.layout.append([

@@ -264,7 +264,6 @@ def forecast_flow(app, use_all):
 class ForecastFlow:
     def __init__(self):
         self.plot_created = False  # Flag to track if the plot has been created
-        self.cur_query = None
         self.real_flow = None
         self.forecast_flow = None
         self.confidence_intervals = None
@@ -275,6 +274,7 @@ class ForecastFlow:
 
         # Use all factors to train model, might generate gibberish
         self.use_all = True
+        self.gen_fac = None
 
         # Create the plot
         self.fig, self.ax = plt.subplots()
@@ -306,8 +306,8 @@ class ForecastFlow:
         app.forecast = self.create_window()
         app.windows.append(app.forecast)
 
-        if self.steps != app.steps:
-            self.cur_query = copy.deepcopy(app.query)
+        if self.steps != app.steps or self.gen_fac != app.gen_fac:
+            self.gen_fac = copy.deepcopy(app.gen_fac)
             # Get tourist flow
             self.real_flow = app.tourist_flow
 
