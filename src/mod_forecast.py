@@ -152,8 +152,9 @@ class SetupForecast:
                 app.run_plot_flow()
 
             if event == "Далее":
-                if self.selected_items:
+                if self.selected_items and self.steps != 0:
                     app.setup.hide()
+                    app.gen_fac = self.selected_items
                     app.run_forecast()
                 else:
                     sg.popup("Пожалуйста, выберите хотя бы 1 параметр")
@@ -168,6 +169,7 @@ class SetupForecast:
                                                               self.input_elements,
                                                               self.combo_elements,
                                                               self.delta_input_elements):
+                    section = parameter['section']
                     name = parameter['name']
                     use_checkbox = checkbox.get()
                     value = input_element.get()
@@ -183,6 +185,7 @@ class SetupForecast:
                             parameter['selected_option'] = selected_option
                             updated_parameters.append(parameter)
                             self.selected_items[name] = {
+                                'section': section,
                                 'value': value,
                                 'delta_value': delta_value,
                                 'selected_option': selected_option
@@ -202,15 +205,16 @@ class SetupForecast:
                     has_invalid_input = True  # Invalid input encountered
 
                 if has_invalid_input:
-                    sg.popup('Неверный ввод. Пожалуйста введите числовые значения для всех выбранных полей.')
+                    sg.popup('Неверный ввод. Пожалуйста введите числовые значения для всех выделенных полей.')
 
-                    # Perform further processing only if there were no invalid inputs
-                if not has_invalid_input:
+                # Perform further processing only if there were no invalid inputs
+                if not self.selected_items and not has_invalid_input:
+                    sg.popup("Пожалуйста, выберите хотя бы 1 параметр")
+                elif not has_invalid_input:
                     # Perform any further processing with the updated parameters and num_steps
                     # For example, print the updated parameters and num_steps
+                    sg.popup('Параметры моделирования заданы успешно! Нажмите <Далее> чтобы продолжить.')
                     app.steps = num_steps
-                    print(f'Selected Items: {self.selected_items}')
-                    print(f'Number of Steps: {num_steps}')
 
         # Close the window
         app.close()

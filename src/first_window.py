@@ -6,7 +6,7 @@ class FirstWindow:
 
     def __init__(self):
         # Read the CSV file
-        df = pd.read_csv('data/areas.csv', encoding='windows-1251')
+        df = pd.read_csv('../data/areas.csv', encoding='windows-1251')
         self.area_list = df['area'].tolist()
         # Selected countries
         self.selected_areas = set()

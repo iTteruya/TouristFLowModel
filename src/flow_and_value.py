@@ -3,11 +3,11 @@ import PySimpleGUI as sg
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import numpy as np
-import ex_database
+import database_example as ex_database
 
 
 class PlotFlow:
-    def __init__(self):
+    def __init__(self, use_db):
         self.plot_created = False  # Flag to track if the plot has been created
         self.cur_query = None
         self.flow = None
@@ -18,13 +18,11 @@ class PlotFlow:
         self.phi = 1.00
         self.omega = 1.00
 
-        self.db = ex_database.DatabaseModel()
+        self.db = ex_database.setup_data(use_db)
 
         # Create the plot
         self.fig, self.ax = plt.subplots()
-        self.ax.set_title('Оценка туристического потока')
-        self.ax.set_xlabel('Дата')
-        self.ax.set_ylabel('Туристический поток')
+
 
     def create_window(self):
         layout = [
@@ -58,6 +56,9 @@ class PlotFlow:
         app.windows.append(app.flow_value)
 
         if self.cur_query != app.query:
+            if not app.use_database and len(app.period[0]) == 10:
+                for area, area_data in app.query.items():
+                    self.db.area[area].partial_fulldate(app.period)
             self.cur_query = copy.deepcopy(app.query)
             self.calculated_values = None
             # Get tourist flow
@@ -86,7 +87,15 @@ class PlotFlow:
             app.flow_value['-MEAN-'].update(f"Общая оценка: {mean_value:.2f}")
 
         # Draw the new plot
+        self.ax.set_title('Оценка туристического потока')
+        self.ax.set_xlabel('Дата')
+        self.ax.set_ylabel('Туристический поток')
         self.ax.plot(app.period, self.flow)
+
+        if len(app.period[0]) == 10 or len(app.period) > 20:
+            # Set x-axis tick positions to display every 12th x-value
+            skip = int(len(app.period) / 6)
+            self.ax.set_xticks(app.period[::skip])
 
         # Draw the plot on the canvas
         canvas = FigureCanvasTkAgg(self.fig, master=app.flow_value['-CANVAS-'].TKCanvas)

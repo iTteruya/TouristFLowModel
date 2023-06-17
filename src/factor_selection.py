@@ -1,7 +1,7 @@
 import PySimpleGUI as sg
 
 trans_infr = ["Публичный транспорт", "Арендованный транспорт", "Транспортная развязка",
-              "Водный транспорт", "Подземный транспорт", "Наземный транспорт", "Такси", "Цена"]
+              "Водный транспорт", "Подземный транспорт", "Наземный транспорт", "Такси", "Трансфер", "Цена"]
 acc_seg = ["Тип жилья", "Потребительская инфраструктура", "Дом", "Квартира", "Отель", "Гостиница",
            "Кемпинг", "Зеленая территория", "Медицинские учреждения", "Торговые центры", "Класс района", "Цена"]
 food_seg = ["Исторические ландшафты", "Природные особенности", "Спорт., муз. и др. мероприятия",
@@ -13,19 +13,19 @@ other = ["Визовые сборы", "Популярный курорт", "Пр
 class FactorSelector:
     def __init__(self):
         self.layout = [
-            [sg.Text("Транспортный сегмент")],
+            [sg.Text("Транспортный сегмент", font='Helvetica 12 bold')],
             [sg.Listbox(values=trans_infr, size=(20, 6), key="-LISTBOX1-",
                         select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE, expand_x=True, expand_y=True)],
-            [sg.Text("Сегмент размещения")],
+            [sg.Text("Сегмент размещения", font='Helvetica 12 bold')],
             [sg.Listbox(values=acc_seg, size=(20, 6), key="-LISTBOX2-", select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE,
                         expand_x=True, expand_y=True)],
-            [sg.Text("Сегмент отдыха и развлечений")],
+            [sg.Text("Сегмент отдыха и развлечений", font='Helvetica 12 bold')],
             [sg.Listbox(values=food_seg, size=(20, 6), key="-LISTBOX3-", select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE,
                         expand_x=True, expand_y=True)],
-            [sg.Text("Пищевой сегмент")],
+            [sg.Text("Пищевой сегмент", font='Helvetica 12 bold')],
             [sg.Listbox(values=rr, size=(20, 6), key="-LISTBOX4-", select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE,
                         expand_x=True, expand_y=True)],
-            [sg.Text("Другие факторы")],
+            [sg.Text("Другие факторы", font='Helvetica 12 bold')],
             [sg.Listbox(values=other, size=(20, 6), key="-LISTBOX5-", select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE,
                         expand_x=True, expand_y=True)],
             [sg.Button("Выход"), sg.Button("Назад"), sg.Button("Очистить"), sg.Button("Выбрать"), sg.Button("Далее")]
@@ -37,11 +37,14 @@ class FactorSelector:
             "Пищевой сегмент": [],
             "Другие факторы": []
         }
+        self.column_layout = [
+            [sg.Column(self.layout, scrollable=True, vertical_scroll_only=True, size=(370, 500))]
+        ]
 
     def select_factors(self, app):
         # Create the window
         if app.factor_selector is None:
-            app.factor_selector = sg.Window("Выбор факторов", self.layout, resizable=True, size=(400, 750))
+            app.factor_selector = sg.Window("Выбор факторов", self.column_layout, resizable=True, size=(370, 500))
             app.windows.append(app.factor_selector)
         else:
             app.factor_selector.un_hide()

@@ -6,6 +6,110 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import random
+import numpy as np
+
+
+def generate_future_exog(app):
+    exog_future_num = []
+    exog_future_val = []
+
+    for factor, data in app.gen_fac.items():
+        num_val = []
+        fac_val = []
+        delta = data['delta_value']
+
+        if data['section'] == "Количественные факторы":
+            for i in range(app.steps):
+                if data['selected_option'] == 'Up':
+                    value = data['value'] + delta * i
+                elif data['selected_option'] == 'Down':
+                    value = data['value'] - delta * i
+                else:
+                    delta_var = random.choice([delta, -delta])
+                    value = data['value'] + delta_var * i
+
+                num_val.append(value)
+        else:
+            for i in range(app.steps):
+                if data['selected_option'] == 'Up':
+                    value = data['value'] + delta * i
+                elif data['selected_option'] == 'Down':
+                    value = data['value'] - delta * i
+                else:
+                    delta_var = random.choice([delta, -delta])
+                    value = data['value'] + delta_var * i
+
+                fac_val.append(value)
+
+        if fac_val:
+            exog_future_val.append(fac_val)
+        if num_val:
+            exog_future_num.append(num_val)
+
+    all_gen = None
+    if exog_future_val and exog_future_num:
+        all_gen = np.concatenate((exog_future_val, exog_future_num), axis=0)
+    elif exog_future_val:
+        all_gen = exog_future_val
+    else:
+        all_gen = exog_future_num
+
+    return all_gen
+
+
+def prepare_train_data(app):
+    date = str(app.period[0])
+
+    if len(date) == 4:
+        all_dates = app.db.area['Российская Федерация'].years_list
+    elif len(date) == 7:
+        all_dates = app.db.area['Российская Федерация'].months_list
+    else:
+        all_dates = app.db.area['Российская Федерация'].fulldate_list
+
+    flow_data = []
+    factor_data = []
+    num_factor_date = []
+
+    for area, area_data in app.query.items():
+        area_flow = []
+        area_fac = []
+        area_num_fac = []
+
+        for date in all_dates:
+            date_flow = app.db.area[area].date[date].tourist_flow
+            area_flow.append(date_flow)
+            date_fac = []
+            date_num = []
+            for factor, data in app.gen_fac.items():
+                if data['section'] == "Количественные факторы":
+                    factor_val = app.db.area[area].date[date].num_factors[factor]
+                    date_num.append(factor_val)
+                else:
+                    factor_val = app.db.area[area].date[date].factors[data['section']][factor]
+                    date_fac.append(factor_val)
+            area_fac.append(date_fac)
+            area_num_fac.append(date_num)
+        flow_data.append(area_flow)
+        factor_data.append(list(zip(*area_fac)))
+        num_factor_date.append(list(zip(*area_num_fac)))
+
+    all_factors = None
+    list_3d_float = np.array(num_factor_date, dtype=float)
+    num_factor_mean = np.sum(list_3d_float, axis=0)
+
+    list_3d_float = np.array(factor_data, dtype=float)  # Convert strings to floats
+    factors_mean = np.mean(list_3d_float, axis=0)
+
+    if num_factor_mean.any() and factors_mean.any():
+        all_factors = np.concatenate((factors_mean, num_factor_mean), axis=0)
+    elif num_factor_mean.any():
+        all_factors = num_factor_mean
+    else:
+        all_factors = factors_mean
+
+    flow = [sum(items) for items in zip(*flow_data)]
+    return flow, all_factors
 
 
 def generate_var(original_df, num_rows, delta):
@@ -88,6 +192,7 @@ def get_all_factors(database, query):
 
     return [*transposed_factors, *transposed_num]
 
+
 def generate_future_dates(date_string, num_steps):
     formats = ["%d-%m-%Y", "%m-%Y", "%Y"]  # Supported date formats
 
@@ -109,41 +214,43 @@ def generate_future_dates(date_string, num_steps):
     for _ in range(num_steps):
         future_dates.append(date.strftime(date_format))
         if date_format == "%Y":
-            date = date.replace(year=date.year + 1)
+            date = date + timedelta(days=1)
         elif date_format == "%m-%Y":
             if date.month == 12:
                 date = date.replace(year=date.year + 1, month=1)
             else:
                 date = date.replace(month=date.month + 1)
         else:
-            month_end = date.replace(day=1, month=date.month + 1) - timedelta(days=1)
-            if date.day >= month_end.day:
-                date = month_end.replace(day=month_end.day)
-            else:
-                date = date.replace(day=date.day + 1)
+            date = date + timedelta(days=1)
 
     return future_dates
 
 
-def forecast_flow(app):
-    # Create a DataFrame with the flow values
-    train_data = pd.DataFrame({'tourist_flow': app.tourist_flow})
+def forecast_flow(app, use_all):
+    if use_all:
+        # Create a DataFrame with the flow values
+        train_data = pd.DataFrame({'tourist_flow': app.tourist_flow})
+        all_factors = get_all_factors(app.db, app.query)
+    else:
+        flow, all_factors = prepare_train_data(app)
+        train_data = pd.DataFrame({'tourist_flow': flow})
 
     # Assign the flow values to the endogenous variable
     endog = train_data['tourist_flow']
-
-    all = get_all_factors(app.db, app.query)
-
-    exog_df = pd.DataFrame(list(zip(*all)))
+    exog_df = pd.DataFrame(list(zip(*all_factors)))
 
     model = SARIMAX(endog, exog=exog_df, order=(1, 0, 0), seasonal_order=(0, 0, 0, 0),
                     start_params=[0.5, 0.5, 0.5, 0.5], method='bfgs', maxiter=1000)
     model_fit = model.fit()
 
-    # exog_forecast = future_data[['exog_var3', 'exog_var4']]  # будущий набор экзогенных переменных для прогноза
-    delta = 5
-    future_ex = generate_var(exog_df, app.steps, delta)
-    forecast = model_fit.get_forecast(steps=app.steps, exog=future_ex)
+    if use_all:
+        delta = 5
+        future_exog_df = generate_var(exog_df, app.steps, delta)
+    else:
+        future_ex = generate_future_exog(app)
+        future_exog_df = pd.DataFrame(list(zip(*future_ex)))
+
+    forecast = model_fit.get_forecast(steps=app.steps, exog=future_exog_df)
 
     # Get the forecasted values
     forecast_values = forecast.predicted_mean
@@ -166,11 +273,11 @@ class ForecastFlow:
         self.period = None
         self.all_flow = None
 
+        # Use all factors to train model, might generate gibberish
+        self.use_all = True
+
         # Create the plot
         self.fig, self.ax = plt.subplots()
-        self.ax.set_title('Предсказанный поток')
-        self.ax.set_xlabel('Дата')
-        self.ax.set_ylabel('Туристический поток')
 
     def create_window(self):
         layout = [
@@ -211,14 +318,22 @@ class ForecastFlow:
         if self.plot_created:
             self.ax.clear()  # Clear the axes
 
-        self.forecast_flow, self.confidence_intervals = forecast_flow(app)
+        self.forecast_flow, self.confidence_intervals = forecast_flow(app, self.use_all)
         self.period = [*app.period, *generate_future_dates(app.period[-1], app.steps)]
 
         self.all_flow = [*self.real_flow, *self.forecast_flow]
         # Draw the new plot
+        self.ax.set_title('Предсказанный поток')
+        self.ax.set_xlabel('Дата')
+        self.ax.set_ylabel('Туристический поток')
         self.ax.plot(self.period, self.all_flow)
 
-        # # Fill the confidence intervals
+        if len(app.period[0]) == 10 or len(self.period) > 20:
+            # Set x-axis tick positions to display every 12th x-value
+            skip = int(len(self.period) / 6)
+            self.ax.set_xticks(self.period[::skip])
+
+        # Fill the confidence intervals
         # self.ax.fill_between(generate_future_dates(app.period[-1], app.steps), self.confidence_intervals.iloc[:, 0],
         #                 self.confidence_intervals.iloc[:, 1], alpha=0.2)
 
