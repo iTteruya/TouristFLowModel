@@ -4,7 +4,6 @@ import pandas as pd
 
 random.seed(0)
 
-
 def generate_value():
     return format(random.uniform(0.00, 1.00), ".2f")
 

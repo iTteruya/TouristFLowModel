@@ -1,35 +1,14 @@
-import PySimpleGUI as sg
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QListWidget, QPushButton, QLabel, QMessageBox, QApplication, \
+    QHBoxLayout
+from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt
+from config import trans_infr, acc_seg, food_seg, rr, other
 
-trans_infr = ["Публичный транспорт", "Арендованный транспорт", "Транспортная развязка",
-              "Водный транспорт", "Подземный транспорт", "Наземный транспорт", "Такси", "Трансфер", "Цена"]
-acc_seg = ["Тип жилья", "Потребительская инфраструктура", "Дом", "Квартира", "Отель", "Гостиница",
-           "Кемпинг", "Зеленая территория", "Медицинские учреждения", "Торговые центры", "Класс района", "Цена"]
-food_seg = ["Исторические ландшафты", "Природные особенности", "Спорт., муз. и др. мероприятия",
-            "Оздоровительный отдых", "Шопинг", "Уникальные объекты", "Уникальные зоны"]
-rr = ["Продукты", "Местные заведения", "Тип заведения", "Цена", "Разнообразие", "Национальные особенности"]
-other = ["Визовые сборы", "Популярный курорт", "Природные факторы", "Количество туристов"]
+class FactorSelector(QWidget):
 
-
-class FactorSelector:
-    def __init__(self):
-        self.layout = [
-            [sg.Text("Транспортный сегмент", font='Helvetica 12 bold')],
-            [sg.Listbox(values=trans_infr, size=(20, 6), key="-LISTBOX1-",
-                        select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE, expand_x=True, expand_y=True)],
-            [sg.Text("Сегмент размещения", font='Helvetica 12 bold')],
-            [sg.Listbox(values=acc_seg, size=(20, 6), key="-LISTBOX2-", select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE,
-                        expand_x=True, expand_y=True)],
-            [sg.Text("Сегмент отдыха и развлечений", font='Helvetica 12 bold')],
-            [sg.Listbox(values=food_seg, size=(20, 6), key="-LISTBOX3-", select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE,
-                        expand_x=True, expand_y=True)],
-            [sg.Text("Пищевой сегмент", font='Helvetica 12 bold')],
-            [sg.Listbox(values=rr, size=(20, 6), key="-LISTBOX4-", select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE,
-                        expand_x=True, expand_y=True)],
-            [sg.Text("Другие факторы", font='Helvetica 12 bold')],
-            [sg.Listbox(values=other, size=(20, 6), key="-LISTBOX5-", select_mode=sg.LISTBOX_SELECT_MODE_MULTIPLE,
-                        expand_x=True, expand_y=True)],
-            [sg.Button("Выход"), sg.Button("Назад"), sg.Button("Очистить"), sg.Button("Выбрать"), sg.Button("Далее")]
-        ]
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
         self.selected_items = {
             "Транспортный сегмент": [],
             "Сегмент размещения": [],
@@ -37,84 +16,161 @@ class FactorSelector:
             "Пищевой сегмент": [],
             "Другие факторы": []
         }
-        self.column_layout = [
-            [sg.Column(self.layout, scrollable=True, vertical_scroll_only=True, size=(370, 500))]
-        ]
 
-    def select_factors(self, app):
-        # Create the window
-        if app.factor_selector is None:
-            app.factor_selector = sg.Window("Выбор факторов", self.column_layout, resizable=True, size=(370, 500))
-            app.windows.append(app.factor_selector)
+        self.init_ui()
+
+    def init_ui(self):
+        main_layout = QVBoxLayout()  # Top-level: vertical
+
+        top_layout = QHBoxLayout()  # Horizontal row of lists
+        category_list_layout = QVBoxLayout()  # All your categories go here
+
+        # Add categories to the left side
+        self.add_category(category_list_layout, "Транспортный сегмент", trans_infr)
+        self.add_category(category_list_layout, "Сегмент размещения", acc_seg)
+        self.add_category(category_list_layout, "Сегмент отдыха и развлечений", food_seg)
+        self.add_category(category_list_layout, "Пищевой сегмент", rr)
+        self.add_category(category_list_layout, "Другие факторы", other)
+
+        # Right side: selected items
+        selected_items_layout = QVBoxLayout()
+        selected_label = QLabel("Выбранные факторы")
+        selected_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.selected_display = QListWidget(self)
+        self.selected_display.setFont(QFont("Arial", 12))
+
+        selected_items_layout.addWidget(selected_label)
+        selected_items_layout.addWidget(self.selected_display)
+
+        # Add both columns to the top layout
+        top_layout.addLayout(category_list_layout, 3)
+        top_layout.addLayout(selected_items_layout, 2)
+
+        main_layout.addLayout(top_layout)  # Add the top row to the main layout
+
+        # --- BUTTONS BELOW ---
+        button_font = QFont()
+        button_font.setPointSize(14)
+        button_font.setBold(True)
+
+        button_row1 = QHBoxLayout()
+        self.clear_button = QPushButton("Очистить", self)
+        self.clear_button.setFont(button_font)
+        self.clear_button.clicked.connect(self.clear_selection)
+        button_row1.addWidget(self.clear_button)
+
+        self.select_button = QPushButton("Выбрать", self)
+        self.select_button.setFont(button_font)
+        self.select_button.clicked.connect(self.select_items)
+        button_row1.addWidget(self.select_button)
+
+        button_row2 = QHBoxLayout()
+        self.button_home = QPushButton("Меню", self)
+        self.button_home.setFont(button_font)
+        self.button_home.clicked.connect(self.return_to_main)
+        button_row2.addWidget(self.button_home)
+
+        self.back_button = QPushButton("Назад", self)
+        self.back_button.setFont(button_font)
+        self.back_button.clicked.connect(self.go_back)
+        button_row2.addWidget(self.back_button)
+
+        self.next_button = QPushButton("Далее", self)
+        self.next_button.setFont(button_font)
+        self.next_button.clicked.connect(self.go_to_next)
+        button_row2.addWidget(self.next_button)
+
+        # Add both button rows to the main layout
+        main_layout.addLayout(button_row1)
+        main_layout.addLayout(button_row2)
+
+        self.setLayout(main_layout)
+        self.setMinimumSize(450, 350)
+        self.resize(1280, 720)
+
+    def add_category(self, layout, category, items):
+        font = QFont("Helvetica", 12, QFont.Weight.Bold)
+        label = QLabel(category)
+        label.setFont(font)
+        layout.addWidget(label)
+
+        list_widget = QListWidget(self)
+        list_widget.addItems(items)
+        list_widget.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        list_widget.setObjectName(category)
+
+        # Set item font
+        item_font = QFont()
+        item_font.setPointSize(12)
+        item_font.setBold(False)
+
+        for index in range(list_widget.count()):
+            list_widget.item(index).setFont(item_font)
+
+        layout.addWidget(list_widget)
+
+    def clear_selection(self):
+        for category in self.selected_items.keys():
+            list_widget = self.findChild(QListWidget, category)
+            if list_widget:
+                list_widget.clearSelection()
+        self.selected_items = {key: [] for key in self.selected_items.keys()}
+        self.selected_display.clear()
+
+    def select_items(self):
+        for category in self.selected_items.keys():
+            list_widget = self.findChild(QListWidget, category)
+            if list_widget:
+                selected_items = [item.text() for item in list_widget.selectedItems()]
+                self.selected_items[category] = selected_items
+        self.show_selected_items()
+
+    def show_selected_items(self):
+        self.selected_display.clear()
+        for category, items in self.selected_items.items():
+            if items:
+                self.selected_display.addItem(f"{category}:")
+                for item in items:
+                    self.selected_display.addItem(f"  • {item}")
+                self.selected_display.addItem("")  # Spacer line
+
+    def return_to_main(self):
+        self.hide()
+        self.app.run_start_menu()
+
+    def go_back(self):
+        self.hide()
+        self.app.run_date_selection()
+
+    def go_to_next(self):
+        if any(self.selected_items.values()):
+            self.hide()
+            self.app.factors = self.selected_items
+            self.app.form_query()
+            self.app.run_plot_flow()
         else:
-            app.factor_selector.un_hide()
+            self.show_warning_message("Пожалуйста, выберите хотя бы 1 фактор")
 
-        selected_window = None
+    def closeEvent(self, event):
+        self.app.close()
 
-        # Event loop
-        while True:
-            event, values = app.factor_selector.read()
+    def show_window(self):
+        self.show()
 
-            if event in (None, "Выход"):
-                break
+    def show_warning_message(self, message):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Предупреждение")
 
-            if event == "Очистить":
-                self.selected_items = {
-                    "Транспортный сегмент": [],
-                    "Сегмент размещения": [],
-                    "Сегмент отдыха и развлечений": [],
-                    "Пищевой сегмент": [],
-                    "Другие факторы": []
-                }
-                # Clear listbox selections
-                app.factor_selector["-LISTBOX1-"].Update(set_to_index=-1)
-                app.factor_selector["-LISTBOX2-"].Update(set_to_index=-1)
-                app.factor_selector["-LISTBOX3-"].Update(set_to_index=-1)
-                app.factor_selector["-LISTBOX4-"].Update(set_to_index=-1)
-                app.factor_selector["-LISTBOX5-"].Update(set_to_index=-1)
+        # Set message box font and alignment
+        font = QFont()
+        font.setPointSize(12)
+        font.setBold(True)
+        msg_box.setFont(font)
 
-            # Save selected items when the "Выбрать" button is clicked
-            elif event == "Выбрать":
-                # Update the selected items dictionary
-                self.selected_items["Транспортный сегмент"] = values["-LISTBOX1-"]
-                self.selected_items["Сегмент размещения"] = values["-LISTBOX2-"]
-                self.selected_items["Сегмент отдыха и развлечений"] = values["-LISTBOX3-"]
-                self.selected_items["Пищевой сегмент"] = values["-LISTBOX4-"]
-                self.selected_items["Другие факторы"] = values["-LISTBOX5-"]
+        msg_label = QLabel(message)
+        msg_label.setFont(font)
+        msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg_box.layout().addWidget(msg_label, 0, 0, 1, msg_box.layout().columnCount(), Qt.AlignmentFlag.AlignCenter)
 
-                # Update selected items display
-                selected_items_text = ""
-                for key, values in self.selected_items.items():
-                    selected_items_text += f"{key}:\n{', '.join(values)}\n\n"
-
-                selected_window = sg.Window("Выбранные факторы",
-                                            [[sg.Multiline(selected_items_text,
-                                                           disabled=True, size=(40, 10), expand_x=True, expand_y=True)],
-                                             [sg.Button("OK")]],
-                                            resizable=True
-                                            )
-                while True:
-                    ev, vals = selected_window.read()
-                    if ev == sg.WINDOW_CLOSED or ev == "OK":
-                        break
-                selected_window.close()
-
-            elif event == "Назад":
-                app.factor_selector.hide()
-                app.run_second_screen()
-
-            elif event == "Далее":
-                if any(values for values in self.selected_items.values()):
-                    app.factor_selector.hide()
-
-                    app.factors = self.selected_items
-                    app.form_query()
-
-                    app.run_plot_flow()
-                else:
-                    sg.popup("Пожалуйста, выберите хотя бы 1 фактор")
-
-        if selected_window is not None:
-            selected_window.close()
-
-        app.close()
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg_box.exec()
