@@ -1,13 +1,41 @@
 import copy
-import PySimpleGUI as sg
-import pandas as pd
-from datetime import datetime, timedelta
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-import random
 import numpy as np
+import pandas as pd
+import pyqtgraph as pg
+from PyQt6.QtCore import Qt, QRunnable, QThreadPool, QObject, pyqtSignal, pyqtSlot
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QMainWindow, QHBoxLayout, QTextEdit, QApplication, \
+    QMessageBox, QFileDialog, QLabel
+from pyqtgraph import mkPen, InfiniteLine
+from pyqtgraph.exporters import ImageExporter
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from config import colors, setup_forecast_analyzer_rus, setup_forecast_analyzer_eng, report_example
+import random
 
+class LLMWorkerSignals(QObject):
+    finished = pyqtSignal(str)           # final report text
+    error   = pyqtSignal(str)            # error string (optional)
+
+class LLMWorker(QRunnable):
+    """
+    Runs the LLM report generation in a separate thread.
+    """
+    def __init__(self, summary: str, lang: str = "eng"):
+        super().__init__()
+        self.summary = summary
+        self.lang = lang
+        self.signals = LLMWorkerSignals()
+
+    @pyqtSlot()
+    def run(self):
+        try:
+            if self.lang == "rus":
+                result = setup_forecast_analyzer_rus(self.summary)
+            else:
+                result = setup_forecast_analyzer_eng(self.summary)
+            self.signals.finished.emit(str(result))
+        except Exception as e:
+            self.signals.error.emit(str(e))
 
 def generate_future_exog(app):
     exog_future_num = []
@@ -228,22 +256,22 @@ def generate_future_dates(date_string, num_steps):
     return future_dates
 
 
-def forecast_flow(app, use_all):
+def forecast_flow(app, cur_flow, use_all):
     if use_all:
-        # Create a DataFrame with the flow values
-        train_data = pd.DataFrame({'tourist_flow': app.tourist_flow})
+        train_data = pd.DataFrame({'tourist_flow': cur_flow})
         all_factors = get_all_factors(app.db, app.query)
     else:
         flow, all_factors = prepare_train_data(app)
         train_data = pd.DataFrame({'tourist_flow': flow})
 
-    # Assign the flow values to the endogenous variable
     endog = train_data['tourist_flow']
     exog_df = pd.DataFrame(list(zip(*all_factors)))
 
-    model = SARIMAX(endog, exog=exog_df, order=(1, 0, 0), seasonal_order=(0, 0, 0, 0),
-                    start_params=[0.5, 0.5, 0.5, 0.5], method='bfgs', maxiter=1000)
-    model_fit = model.fit()
+    # 🧠 [DUMMY PLACEHOLDER] Insert AI-enhanced exogenous feature transformation or selection
+    exog_df = apply_future_ai_model(exog_df, app)
+
+    model = SARIMAX(endog, exog=exog_df, order=(1, 0, 0), seasonal_order=(0, 0, 0, 0))
+    model_fit = model.fit(method='bfgs', maxiter=1000)
 
     if use_all:
         delta = 5
@@ -252,115 +280,292 @@ def forecast_flow(app, use_all):
         future_ex = generate_future_exog(app)
         future_exog_df = pd.DataFrame(list(zip(*future_ex)))
 
+    # 🧠 [DUMMY PLACEHOLDER] Apply AI to refine future exogenous features
+    future_exog_df = refine_future_exog_with_ai(future_exog_df, app)
+
     forecast = model_fit.get_forecast(steps=app.steps, exog=future_exog_df)
-
-    # Get the forecasted values
     forecast_values = forecast.predicted_mean
-
-    # Get the confidence intervals for the forecast
     confidence_intervals = forecast.conf_int()
 
     return forecast_values, confidence_intervals
 
-
-class ForecastFlow:
-    def __init__(self):
+class ForecastFlow(QMainWindow):
+    def __init__(self, app):
+        super().__init__()
+        self.analyzer_report = None
         self.plot_created = False  # Flag to track if the plot has been created
-        self.real_flow = None
-        self.forecast_flow = None
-        self.confidence_intervals = None
+        self.real_flow = {}
+        self.forecast_flow = {}
+        self.confidence_intervals = {}
         self.steps = None
         self.db = None
         self.period = None
-        self.all_flow = None
+        self.area_flows = {}
+        self.overall_flow = None
+        self.thread_pool = QThreadPool.globalInstance()
 
         # Use all factors to train model, might generate gibberish
         self.use_all = True
         self.gen_fac = None
 
-        # Create the plot
-        self.fig, self.ax = plt.subplots()
+        # Store the main application reference
+        self.app = app
 
-    def create_window(self):
-        layout = [
-            [sg.Canvas(key='-CANVAS-', expand_x=True, expand_y=True)],
-            [sg.Button('Выход'), sg.Button("Назад")]
-        ]
+        # Create the main widget and layout
+        self.central_widget = QWidget()
+        self.layout = QVBoxLayout(self.central_widget)
 
-        window = sg.Window('Туристический поток', layout, finalize=True, resizable=True)
+        # Create a plot widget from PyQtGraph
+        self.plot_widget = pg.PlotWidget()
+        self.layout.addWidget(self.plot_widget)
 
-        # Set a suitable window size
-        window_size = (900, 900)  # Adjust the width as needed
-        window.TKroot.geometry(f"{window_size[0]}x{window_size[1]}")
+        # Report display area (multiline text box, read-only)
+        self.report_text = QTextEdit()
+        self.report_text.setReadOnly(True)
+        self.report_text.setPlaceholderText("Для формирования отчета и рекомендаций начните анализ результатов")
+        self.layout.addWidget(self.report_text)  # Add between plot and buttons
 
-        # Center the window
-        window.TKroot.update_idletasks()  # Ensure the window has the correct size before centering
-        width, height = window.TKroot.winfo_width(), window.TKroot.winfo_height()
-        screen_width, screen_height = window.TKroot.winfo_screenwidth(), window.TKroot.winfo_screenheight()
-        x = (screen_width - width) // 2
-        y = (screen_height - height) // 2
-        window.TKroot.geometry(f"{width}x{height}+{x}+{y}")
+        button_layout0 = QHBoxLayout()
 
-        return window
+        self.analyze_button = QPushButton("Анализ результатов и формирование рекомендаций", self)
+        self.analyze_button.clicked.connect(self.llm_analyze)
+        button_layout0.addWidget(self.analyze_button)
 
-    def forecast(self, app):
-        # Create the window
-        app.forecast = self.create_window()
-        app.windows.append(app.forecast)
+        self.save_button = QPushButton('Сохранить результаты')
+        self.save_button.clicked.connect(self.save_results)
+        button_layout0.addWidget(self.save_button)
 
-        if self.steps != app.steps or self.gen_fac != app.gen_fac:
-            self.gen_fac = copy.deepcopy(app.gen_fac)
+        self.layout.addLayout(button_layout0)
+
+        # Add exit and back buttons
+        self.home_button = QPushButton('Меню')
+        self.back_button = QPushButton('Назад')
+
+        button_layout1 = QHBoxLayout()
+        button_layout1.addWidget(self.home_button)
+        button_layout1.addWidget(self.back_button)
+        self.layout.addLayout(button_layout1)
+
+        # Connect button signals
+        self.home_button.clicked.connect(self.return_to_main)
+        self.back_button.clicked.connect(self.go_back)
+
+        # Initialize the plot
+        self.plot = self.plot_widget.plot()
+        self.plot_widget.setTitle("Предсказанный поток")
+        self.plot_widget.setLabel('bottom', 'Дата')
+        self.plot_widget.setLabel('left', 'Туристический поток')
+        self.plot_widget.showGrid(x=True, y=True)
+        self.plot_widget.setBackground('w')  # Set plot background to white
+
+    def llm_analyze(self):
+
+        # Example: gather forecast result summary
+
+        forecast_data_summary_example = """
+                Area: Downtown
+                Dates: 2024-01 to 2024-12
+                Top Factors: [Weather Index: 0.32, Holiday Events: 0.28, Hotel Prices: -0.15, Marketing Score: 0.10, Public Transport Availability: 0.08]
+                Forecasted Tourist Flow (2024-06): 120,000 (CI: 110,000 – 130,000)
+                Observed Flow (2024-06): 125,000
+                ...
+
+                Area: Beachfront
+                ...
+                """
+
+        #Replace with actual analyzer
+        analyze_forecasting_results(self.forecast_flow, self.app)
+
+        forecast_data_summary = ""
+        for area, forecast in self.forecast_flow.items():
+            mean_val = forecast.mean()
+            forecast_data_summary += f"Область: {area}, Среднее прогнозируемое значение: {mean_val:.2f}\n"
+
+        if self.app.use_llm:
+            # UI feedback
+            self.report_text.setPlainText("🔄 Генерация отчёта… Пожалуйста, подождите.")
+            self.analyze_button.setEnabled(False)
+            QApplication.processEvents()
+
+            # create worker and wire signals
+            worker = LLMWorker(forecast_data_summary, lang="rus")  # or "eng"
+            worker.signals.finished.connect(self._llm_done)
+            worker.signals.error.connect(self._llm_error)
+
+            self.thread_pool.start(worker)
+        else:
+            self.report_text.setPlainText(report_example)
+            self.analyzer_report = report_example
+
+    def _llm_done(self, report: str):
+        self.report_text.setPlainText(report)
+        self.analyzer_report = report
+        self.analyze_button.setEnabled(True)
+
+    def _llm_error(self, msg: str):
+        self.report_text.setPlainText(f"❌ Ошибка LLM: {msg}")
+        self.analyzer_report = msg
+        self.analyze_button.setEnabled(True)
+
+    def return_to_main(self):
+        self.app.forecast.hide()
+        self.app.run_start_menu()
+
+    def go_back(self):
+        self.app.forecast.hide()
+        self.app.run_setup_forecast()
+
+    def show_window(self):
+        self.app.forecast.show()
+        self.plot_forecast()
+
+    def save_results(self):
+        if not self.analyzer_report:
+            self.show_warning_message("Нет данных для сохранения.")
+            return
+
+        # Ask user where to save
+        file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить результаты", "", "Text Files (*.txt)")
+        if file_path:
+            # Save textual results
+            try:
+                with open(file_path, 'w', encoding='utf-8') as file:
+                    file.write(self.analyzer_report)
+            except Exception as e:
+                self.show_warning_message(f"Ошибка при сохранении файла: {str(e)}")
+                return
+
+            # Try saving plot image
+            try:
+                exporter = ImageExporter(self.plot_widget.plotItem)
+                image_path = file_path.rsplit('.', 1)[0] + '.png'
+                exporter.export(image_path)
+            except Exception as e:
+                self.show_warning_message(f"Текст сохранён, но ошибка при сохранении графика: {str(e)}")
+                return
+
+            QMessageBox.information(self, "Сохранение завершено", "Результаты и график успешно сохранены.")
+
+    def plot_forecast(self):
+        self.area_flows.clear()
+        self.forecast_flow.clear()
+        self.confidence_intervals.clear()
+
+        if self.steps != self.app.steps or self.gen_fac != self.app.gen_fac:
+            self.gen_fac = copy.deepcopy(self.app.gen_fac)
             # Get tourist flow
-            self.real_flow = app.tourist_flow
+            self.real_flow = self.app.area_flows
 
             self.plot_created = False
-            self.ax.clear()
+            self.plot.clear()
 
-        # Clear previous plot if it was created
-        if self.plot_created:
-            self.ax.clear()  # Clear the axes
+            self.period = [*self.app.period, *generate_future_dates(self.app.period[-1], self.app.steps)]
 
-        self.forecast_flow, self.confidence_intervals = forecast_flow(app, self.use_all)
-        self.period = [*app.period, *generate_future_dates(app.period[-1], app.steps)]
+            for (area, flow) in self.real_flow.items():
+                self.forecast_flow[area], self.confidence_intervals[area] = forecast_flow(self.app, flow, self.use_all)
+                self.area_flows[area] = [*self.real_flow[area], *self.forecast_flow[area]]
 
-        self.all_flow = [*self.real_flow, *self.forecast_flow]
-        # Draw the new plot
-        self.ax.set_title('Предсказанный поток')
-        self.ax.set_xlabel('Дата')
-        self.ax.set_ylabel('Туристический поток')
-        self.ax.plot(self.period, self.all_flow)
+        self.overall_flow = [sum(items) for items in zip(*self.area_flows.values())]
 
-        if len(app.period[0]) == 10 or len(self.period) > 20:
-            # Set x-axis tick positions to display every 12th x-value
-            skip = int(len(self.period) / 6)
-            self.ax.set_xticks(self.period[::skip])
+        # Clear old plots
+        self.plot_widget.clear()
+        self.plot_widget.addLegend()
 
-        # Fill the confidence intervals
-        # self.ax.fill_between(generate_future_dates(app.period[-1], app.steps), self.confidence_intervals.iloc[:, 0],
-        #                 self.confidence_intervals.iloc[:, 1], alpha=0.2)
+        self.plot_created = False
+        self.plot_widget.clear()
 
-        # Draw the plot on the canvas
-        canvas = FigureCanvasTkAgg(self.fig, master=app.forecast['-CANVAS-'].TKCanvas)
-        canvas.draw()
+        self.plot_widget.setTitle('Прогноз туристического потока')
+        self.plot_widget.setLabel('bottom', text='Дата')
+        self.plot_widget.setLabel('left', text='Туристический поток')
 
-        # Add the canvas to the layout
-        canvas.get_tk_widget().pack(fill='both', expand=True)
+        if len(self.app.period[0]) == 10:
+            x_axis_dates = [datetime.strptime(date, '%d-%m-%Y') for date in self.period]
+            self.plot_widget.getAxis('bottom').setTicks(
+                [[(i, date.strftime('%d-%m-%Y')) for i, date in enumerate(x_axis_dates)]])
+        elif len(self.app.period[0]) == 7:
+            x_axis_dates = [datetime.strptime(date, '%m-%Y') for date in self.period]
+            self.plot_widget.getAxis('bottom').setTicks(
+                [[(i, date.strftime('%m-%Y')) for i, date in enumerate(x_axis_dates)]])
+        else:
+            x_axis_dates = [datetime.strptime(date, '%Y') for date in self.period]
+            self.plot_widget.getAxis('bottom').setTicks(
+                [[(i, date.strftime('%Y')) for i, date in enumerate(x_axis_dates)]])
 
-        toolbar = NavigationToolbar2Tk(canvas, app.forecast['-CANVAS-'].TKCanvas)
-        toolbar.update()
+        x_values = list(range(len(self.period)))
+
+        split_index = len(self.app.period) - 1
+        vline = InfiniteLine(pos=split_index, angle=90, movable=False, pen=mkPen(color='magenta', width=3, style=Qt.PenStyle.DashLine))
+        self.plot_widget.addItem(vline)
+
+        for i, (area, flow) in enumerate(self.area_flows.items()):
+            color = colors[i % len(colors)]
+            self.plot_widget.plot(x=x_values, y=flow, pen=mkPen(color=color, width=2), name=area)
+
+        if len(self.area_flows) > 1:
+            self.plot_widget.plot(x=x_values, y=self.overall_flow, pen=mkPen(color='r', width=3), name='Общий поток')
 
         self.plot_created = True
 
-        # Event loop
-        while True:
-            event, values = app.forecast.read()
+    def create_window(self):
+        self.app.forecast = QMainWindow()
+        self.app.forecast.setWindowTitle(self.windowTitle())
+        self.app.forecast.setMinimumSize(600, 600)
+        self.app.forecast.resize(1280, 720)
 
-            if event == sg.WINDOW_CLOSED or event == 'Выход':
-                break
+        self.app.forecast.setCentralWidget(self.central_widget)
 
-            elif event == "Назад":
-                app.forecast.hide()
-                app.run_setup_forecast()
+        # Center the window
+        screen_geometry = self.app.forecast.screen().geometry()
+        x = int((screen_geometry.width() - self.app.forecast.width()) / 2)
+        y = int((screen_geometry.height() - self.app.forecast.height()) / 2)
+        self.app.forecast.move(x, y)
 
-        # Close the window
-        app.close()
+        self.app.windows.append(self.app.forecast)
+
+    def show_warning_message(self, message):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Предупреждение")
+
+        font = QFont()
+        font.setPointSize(12)
+        font.setBold(True)
+        msg_box.setFont(font)
+
+        msg_label = QLabel(message)
+        msg_label.setFont(font)
+        msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg_box.layout().addWidget(msg_label, 0, 0, 1, msg_box.layout().columnCount(), Qt.AlignmentFlag.AlignCenter)
+
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg_box.exec()  # Note the use of exec_() instead of exec()
+
+    def forecast(self):
+        self.create_window()
+        self.show_window()
+
+    def closeEvent(self, event):
+        self.app.close()
+
+
+def analyze_forecasting_results(forecasting_results, app):
+    """
+    Dummy placeholder for analyzing forecasting results.
+    """
+    # TODO: Replace this with actual analyzer logic
+    return forecasting_results
+
+def apply_future_ai_model(exog_df, app):
+    """
+    Dummy placeholder for AI-based preprocessing, feature selection or embedding generation.
+    """
+    # TODO: Replace this with actual AI-enhanced logic (e.g., PCA, autoencoder, neural embedding, etc.)
+    return exog_df
+
+
+def refine_future_exog_with_ai(future_exog_df, app):
+    """
+    Dummy placeholder for AI-based future exogenous feature refinement.
+    """
+    # TODO: Implement AI methods like generative models, boosting, etc., for future feature improvement
+    return future_exog_df

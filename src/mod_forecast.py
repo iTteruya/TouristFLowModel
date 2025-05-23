@@ -1,21 +1,15 @@
-import PySimpleGUI as sg
-
-trans_infr = ["Публичный транспорт", "Арендованный транспорт", "Транспортная развязка",
-              "Водный транспорт", "Подземный транспорт", "Наземный транспорт", "Такси", "Трансфер", "Цена"]
-acc_seg = ["Тип жилья", "Потребительская инфраструктура", "Дом", "Квартира", "Отель", "Гостиница",
-           "Кемпинг", "Зеленая территория", "Медицинские учреждения", "Торговые центры", "Класс района", "Цена"]
-food_seg = ["Исторические ландшафты", "Природные особенности", "Спорт., муз. и др. мероприятия",
-            "Оздоровительный отдых", "Шопинг", "Уникальные объекты", "Уникальные зоны"]
-rr = ["Продукты", "Местные заведения", "Тип заведения", "Цена", "Разнообразие", "Национальные особенности"]
-other = ["Визовые сборы", "Популярный курорт", "Природные факторы", "Количество туристов"]
-num_value = ["Кол-во отелей", "Кол-во гостиниц", "Кол-во ресторанов", "Кол-во ТЦ", "Кол-во мед. учр.",
-             "Кол-во санаториев", "Цена продуктов"]
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QCheckBox, QComboBox, QMessageBox, QScrollArea
+)
+from config import all_factors_by_category, trans_infr, acc_seg, food_seg, rr, other, num_value
 
 all_factors = [trans_infr, acc_seg, food_seg, rr, other, num_value]
 names_of = ["Транспортный сегмент", "Сегмент размещения", "Пищевой сегмент",
             "Сегмент отдыха и развлечений", "Другие факторы", "Количественные факторы"]
 
-# Define the list of parameters and their initial values
 parameters = []
 
 for i, section in enumerate(names_of):
@@ -24,7 +18,7 @@ for i, section in enumerate(names_of):
             'section': section,
             'name': name,
             'value': None,
-            'use_checkbox': True,
+            'use_checkbox': False,
             'delta_value': None,
             'options': ['Up', 'Down', 'Mix'],
             'selected_option': 'Up'
@@ -32,187 +26,257 @@ for i, section in enumerate(names_of):
         parameters.append(parameter)
 
 
-class SetupForecast:
-    def __init__(self):
-        # Create the layout
-        self.layout = [
-            [sg.Text('Количество шагов:'), sg.Input(key='num_steps', size=(10, 1))],
-            [sg.Button('Выбрать все'), sg.Button('Снять все')],
-            [sg.HorizontalSeparator()]
-        ]
+class SetupForecast(QMainWindow):
+
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+        self.setMinimumSize(600, 600)  # Minimum size for the window
+        self.resize(1280, 720)  # Initial size of the window
+
+        # Central widget with scroll area
+        self.central_widget = QWidget()
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setWidget(self.central_widget)
+
+        self.setCentralWidget(self.scroll_area)
+
+        self.central_layout = QVBoxLayout()
+        self.central_widget.setLayout(self.central_layout)
+
+        self.create_ui()
+
+    def create_ui(self):
+        self.steps_label = QLabel('Количество шагов:')
+        self.steps_label.setFont(QFont('Helvetica', 10))
+        self.num_steps_input = QLineEdit()
+        self.num_steps_input.setFixedWidth(100)
+        self.central_layout.addWidget(self.steps_label)
+        self.central_layout.addWidget(self.num_steps_input)
+
+        self.elements_layout = QVBoxLayout()
 
         self.checkbox_elements = []
         self.input_elements = []
         self.combo_elements = []
         self.delta_input_elements = []
-        self.selected_items = {}
-        self.steps = None
 
         current_section = None
-
-        for i, parameter in enumerate(parameters):
+        for parameter in parameters:
             section = parameter['section']
             name = parameter['name']
-            value = parameter['value']
             use_checkbox = parameter['use_checkbox']
-            delta_value = parameter['delta_value']
-            options = parameter['options']
-            selected_option = parameter['selected_option']
 
             if section != current_section:
                 current_section = section
-                self.layout.append([sg.Text(section, font='Helvetica 12 bold')])
+                section_label = QLabel(section)
+                section_label.setFont(QFont('Helvetica', 12, QFont.Weight.Bold))
+                self.elements_layout.addWidget(section_label)
 
-            checkbox = sg.Checkbox('', default=not use_checkbox, key=f'use_{i}', enable_events=True)
+            horizontal_layout = QHBoxLayout()
+
+            checkbox = QCheckBox()
+            checkbox.setChecked(use_checkbox)
+            checkbox.setObjectName(name)  # Use name as object name to identify later
+            checkbox.stateChanged.connect(self.toggle_input)
+            horizontal_layout.addWidget(checkbox)
             self.checkbox_elements.append(checkbox)
 
-            input_element = sg.Input(default_text='' if value is None else str(value), key=name, size=(10, 1),
-                                     disabled=use_checkbox)
+            name_label = QLabel(f'{name}:')
+            name_label.setFont(QFont('Helvetica', 10))
+            name_label.setFixedWidth(200)
+            name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)  # Align left and center vertically
+            horizontal_layout.addWidget(name_label)
+
+            input_element = QLineEdit()
+            input_element.setObjectName(f'value_{name}')
+            input_element.setEnabled(use_checkbox)  # Initially enable/disable based on use_checkbox
+            input_element.setStyleSheet("background-color: lightgray;" if not use_checkbox else "")
+            horizontal_layout.addWidget(input_element)
             self.input_elements.append(input_element)
 
-            combo_element = sg.Combo(options, default_value=selected_option, key=f'option_{i}',
-                                     disabled=use_checkbox)
-            self.combo_elements.append(combo_element)
+            delta_label = QLabel('Delta:')
+            delta_label.setFixedWidth(40)
+            delta_label.setFont(QFont('Helvetica', 10))
+            horizontal_layout.addWidget(delta_label)
 
-            delta_input_element = sg.Input(default_text='' if delta_value is None else str(delta_value),
-                                           key=f'delta_{i}',
-                                           disabled=use_checkbox, size=(10, 1))
+            delta_input_element = QLineEdit()
+            delta_input_element.setObjectName(f'delta_{name}')
+            delta_input_element.setEnabled(use_checkbox)  # Initially enable/disable based on use_checkbox
+            delta_input_element.setStyleSheet("background-color: lightgray;" if not use_checkbox else "")
+            horizontal_layout.addWidget(delta_input_element)
             self.delta_input_elements.append(delta_input_element)
 
-            self.layout.append([
-                checkbox,
-                sg.Text(f'{name}', size=(25, 1)),
-                sg.Text('| Value:', size=(5, 1)),
-                input_element,
-                sg.Text('Delta:', size=(4, 1)),
-                delta_input_element,
-                sg.Text('Option:', size=(5, 1)),
-                combo_element
-            ])
+            option_label = QLabel('Option:')
+            option_label.setFixedWidth(50)
+            option_label.setFont(QFont('Helvetica', 10))
+            horizontal_layout.addWidget(option_label)
 
-        self.layout.append([sg.Button('Выход'), sg.Button('Назад'), sg.Button('Выбрать'), sg.Button('Далее')])
-        # Wrap the layout in a Column element
-        self.column_layout = [
-            [sg.Column(self.layout, scrollable=True, vertical_scroll_only=True)]
-        ]
+            combo_element = QComboBox()
+            combo_element.addItems(parameter['options'])
+            combo_element.setCurrentText(parameter['selected_option'])
+            combo_element.setEnabled(use_checkbox)  # Initially enable/disable based on use_checkbox
+            combo_element.setObjectName(f'option_{name}')
+            combo_element.setStyleSheet("background-color: lightgray;" if not use_checkbox else "")
+            horizontal_layout.addWidget(combo_element)
+            self.combo_elements.append(combo_element)
 
-    def show_setup(self, app):
-        # Create the window
-        if app.setup is None:
-            # Create the window
-            app.setup = sg.Window('Parameter Viewer', self.column_layout, resizable=True)
-            app.windows.append(app.setup)
+            self.elements_layout.addLayout(horizontal_layout)
+            self.elements_layout.addSpacing(2)  # Adjusted spacing between rows
+
+        self.central_layout.addLayout(self.elements_layout)
+        self.central_layout.addSpacing(10)
+
+        # Check/Uncheck all buttons
+        check_all_button = QPushButton('Выбрать все')
+        check_all_button.clicked.connect(self.check_all)
+        uncheck_all_button = QPushButton('Снять все')
+        uncheck_all_button.clicked.connect(self.uncheck_all)
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(uncheck_all_button)
+        button_layout.addWidget(check_all_button)
+        self.central_layout.addLayout(button_layout)
+
+        # Navigation buttons
+        nav_layout = QHBoxLayout()
+        home_button = QPushButton("Меню", self)
+        home_button.clicked.connect(self.return_to_main)
+        back_button = QPushButton('Назад')
+        back_button.clicked.connect(self.go_back)
+        next_button = QPushButton('Далее')
+        next_button.clicked.connect(self.go_to_next)
+        nav_layout.addWidget(home_button)
+        nav_layout.addWidget(back_button)
+        nav_layout.addWidget(next_button)
+        self.central_layout.addLayout(nav_layout)
+
+    def toggle_input(self, checked):
+        checkbox = self.sender()
+        index = self.checkbox_elements.index(checkbox)
+
+        input_element = self.input_elements[index]
+        combo_element = self.combo_elements[index]
+        delta_input_element = self.delta_input_elements[index]
+
+        enabled = checked
+        input_element.setEnabled(enabled)
+        combo_element.setEnabled(enabled)
+        delta_input_element.setEnabled(enabled)
+
+        if enabled:
+            input_element.setStyleSheet("")
+            combo_element.setStyleSheet("")
+            delta_input_element.setStyleSheet("")
         else:
-            app.setup.un_hide()
-        # Event loop
-        while True:
-            event, values = app.setup.read()
+            input_element.setStyleSheet("background-color: lightgray;")
+            combo_element.setStyleSheet("background-color: lightgray;")
+            delta_input_element.setStyleSheet("background-color: lightgray;")
 
-            if event == sg.WINDOW_CLOSED or event == 'Выход':
-                break
+    def check_all(self):
+        for checkbox, input_element, combo_element, delta_input_element in zip(
+                self.checkbox_elements,
+                self.input_elements,
+                self.combo_elements,
+                self.delta_input_elements
+        ):
+            checkbox.setChecked(True)
+            input_element.setEnabled(True)
+            combo_element.setEnabled(True)
+            delta_input_element.setEnabled(True)
 
-            if event.startswith('use_'):
-                checkbox_index = int(event.split('_')[1])
-                checkbox_value = values[event]
-                input_element = self.input_elements[checkbox_index]
-                combo_element = self.combo_elements[checkbox_index]
-                delta_input_element = self.delta_input_elements[checkbox_index]
-                input_element.update(disabled=not checkbox_value)
-                combo_element.update(disabled=not checkbox_value)
-                delta_input_element.update(disabled=not checkbox_value)
+            input_element.setStyleSheet("")
+            combo_element.setStyleSheet("")
+            delta_input_element.setStyleSheet("")
 
-            if event == 'Выбрать все':
-                for checkbox, input_element, combo_element, delta_input_element in zip(
-                        self.checkbox_elements,
-                        self.input_elements,
-                        self.combo_elements,
-                        self.delta_input_elements
-                ):
-                    checkbox.update(value=True)
-                    input_element.update(disabled=False)
-                    combo_element.update(disabled=False)
-                    delta_input_element.update(disabled=False)
+    def uncheck_all(self):
+        for checkbox, input_element, combo_element, delta_input_element in zip(
+                self.checkbox_elements,
+                self.input_elements,
+                self.combo_elements,
+                self.delta_input_elements
+        ):
+            checkbox.setChecked(False)
+            input_element.setEnabled(False)
+            combo_element.setEnabled(False)
+            delta_input_element.setEnabled(False)
 
-            if event == 'Снять все':
-                for checkbox, input_element, combo_element, delta_input_element in zip(
-                        self.checkbox_elements,
-                        self.input_elements,
-                        self.combo_elements,
-                        self.delta_input_elements
-                ):
-                    checkbox.update(value=False)
-                    input_element.update(disabled=True)
-                    combo_element.update(disabled=True)
-                    delta_input_element.update(disabled=True)
+            input_element.setStyleSheet("background-color: lightgray;")
+            combo_element.setStyleSheet("background-color: lightgray;")
+            delta_input_element.setStyleSheet("background-color: lightgray;")
 
-            if event == "Назад":
-                app.setup.hide()
-                app.run_plot_flow()
+    def return_to_main(self):
+        self.hide()
+        self.app.run_start_menu()
 
-            if event == "Далее":
-                if self.selected_items and self.steps != 0:
-                    app.setup.hide()
-                    app.gen_fac = self.selected_items
-                    app.run_forecast()
-                else:
-                    sg.popup("Пожалуйста, выберите хотя бы 1 параметр")
+    def go_back(self):
+        self.hide()
 
-            if event == 'Выбрать':
-                has_invalid_input = False  # Flag to track invalid input
-                updated_parameters = []
-                self.selected_items = {}
-                for parameter, checkbox, input_element, \
-                    combo_element, delta_input_element in zip(parameters,
-                                                              self.checkbox_elements,
-                                                              self.input_elements,
-                                                              self.combo_elements,
-                                                              self.delta_input_elements):
-                    section = parameter['section']
-                    name = parameter['name']
-                    use_checkbox = checkbox.get()
-                    value = input_element.get()
-                    delta_value = delta_input_element.get()
-                    selected_option = combo_element.get()
+        if self.app.skip_eval is True:
+            self.app.run_date_selection()
+        else:
+            self.app.run_plot_flow()
 
-                    if use_checkbox:
-                        try:
-                            value = float(value)
-                            delta_value = float(delta_value)
-                            parameter['value'] = value
-                            parameter['delta_value'] = delta_value
-                            parameter['selected_option'] = selected_option
-                            updated_parameters.append(parameter)
-                            self.selected_items[name] = {
-                                'section': section,
-                                'value': value,
-                                'delta_value': delta_value,
-                                'selected_option': selected_option
-                            }
-                        except ValueError:
-                            has_invalid_input = True  # Invalid input encountered
-                    else:
-                        parameter['value'] = None
-                        parameter['delta_value'] = None
-                        parameter['selected_option'] = None
-                        updated_parameters.append(parameter)
+    def go_to_next(self):
+        selected_items = {}
+        has_invalid_input = False
 
-                num_steps = values['num_steps']
+        self.app.factors = all_factors_by_category
+        self.app.form_query()
+
+        for parameter, checkbox, input_element, combo_element, delta_input_element in zip(
+                parameters,
+                self.checkbox_elements,
+                self.input_elements,
+                self.combo_elements,
+                self.delta_input_elements
+        ):
+            name = parameter['name']
+            use_checkbox = checkbox.isChecked()
+
+            if use_checkbox:
+                value = input_element.text().strip()
+                delta_value = delta_input_element.text().strip()
+                selected_option = combo_element.currentText()
+
                 try:
-                    num_steps = int(num_steps)
+                    value = float(value)
+                    delta_value = float(delta_value)
+                    selected_items[name] = {
+                        'section': parameter['section'],
+                        'value': value,
+                        'delta_value': delta_value,
+                        'selected_option': selected_option
+                    }
                 except ValueError:
-                    has_invalid_input = True  # Invalid input encountered
+                    has_invalid_input = True
 
-                if has_invalid_input:
-                    sg.popup('Неверный ввод. Пожалуйста введите числовые значения для всех выделенных полей.')
+        if has_invalid_input:
+            QMessageBox.critical(self, 'Ошибка', 'Неверный ввод. Пожалуйста, введите числовые значения для всех выделенных полей.')
+            return
 
-                # Perform further processing only if there were no invalid inputs
-                if not self.selected_items and not has_invalid_input:
-                    sg.popup("Пожалуйста, выберите хотя бы 1 параметр")
-                elif not has_invalid_input:
-                    # Perform any further processing with the updated parameters and num_steps
-                    # For example, print the updated parameters and num_steps
-                    sg.popup('Параметры моделирования заданы успешно! Нажмите <Далее> чтобы продолжить.')
-                    app.steps = num_steps
+        if not selected_items:
+            QMessageBox.critical(self, 'Ошибка', 'Пожалуйста, выберите хотя бы один параметр.')
+            return
 
-        # Close the window
-        app.close()
+        num_steps = self.num_steps_input.text().strip()
+        try:
+            num_steps = int(num_steps)
+            if num_steps <= 0:
+                raise ValueError("Number of steps must be positive")
+            self.app.steps = num_steps
+        except ValueError:
+            QMessageBox.critical(self, 'Ошибка', 'Введите корректное положительное число для количества шагов.')
+            return
+
+        self.app.gen_fac = selected_items
+        self.hide()
+        self.app.run_forecast()
+
+    def show_window(self):
+        self.show()
+
+    def closeEvent(self, event):
+        self.app.close()

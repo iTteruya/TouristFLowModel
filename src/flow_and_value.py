@@ -1,16 +1,25 @@
 import copy
-import PySimpleGUI as sg
-import matplotlib.pyplot as plt
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 import numpy as np
-import database_example as ex_database
+import pyqtgraph as pg
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QLabel, QMainWindow, QHBoxLayout,
+                             QPlainTextEdit, QMessageBox, QFileDialog)
+from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt
+from pyqtgraph import mkPen
+from pyqtgraph.exporters import ImageExporter
+from datetime import datetime
+from config import colors
 
+class PlotFlow(QMainWindow):
 
-class PlotFlow:
-    def __init__(self, use_db):
-        self.plot_created = False  # Flag to track if the plot has been created
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+        self.use_db = app.use_database
+        self.plot_created = False
         self.cur_query = None
         self.flow = None
+        self.area_flows = {}
         self.calculated_values = None
         self.alpha = 1.00
         self.beta = 1.00
@@ -18,161 +27,292 @@ class PlotFlow:
         self.phi = 1.00
         self.omega = 1.00
 
-        self.db = ex_database.setup_data(use_db)
+        self.db = app.db
 
-        # Create the plot
-        self.fig, self.ax = plt.subplots()
+        self.init_ui()
 
+    def init_ui(self):
+        widget = QWidget()
+        self.setCentralWidget(widget)
 
-    def create_window(self):
-        layout = [
-            [sg.Canvas(key='-CANVAS-', expand_x=True, expand_y=True)],
-            [sg.Text('Оценка влияния факторов: ', font=('Helvetica', 16))],
-            [sg.Multiline('', key='-VALUES-', size=(30, 6), font=('Helvetica', 16), disabled=True)],
-            [sg.Text('', key='-MEAN-', size=(30, 1), font=('Helvetica', 16))],
-            [sg.Button('Рассчитать', key='-CALCULATE-')],
-            [sg.Button('Выход'), sg.Button("Назад"), sg.Button("Далее")]
-        ]
+        layout = QVBoxLayout()
 
-        window = sg.Window('Туристический поток', layout, finalize=True, resizable=True)
+        self.plot_widget = pg.PlotWidget()
+        self.plot_widget.setBackground('w')
+        layout.addWidget(self.plot_widget)
 
-        # Set a suitable window size
-        window_size = (900, 900)  # Adjust the width as needed
-        window.TKroot.geometry(f"{window_size[0]}x{window_size[1]}")
+        label = QLabel('Оценка влияния факторов: ')
+        label.setFont(QFont('Helvetica', 16))
+        layout.addWidget(label)
 
-        # Center the window
-        window.TKroot.update_idletasks()  # Ensure the window has the correct size before centering
-        width, height = window.TKroot.winfo_width(), window.TKroot.winfo_height()
-        screen_width, screen_height = window.TKroot.winfo_screenwidth(), window.TKroot.winfo_screenheight()
-        x = (screen_width - width) // 2
-        y = (screen_height - height) // 2
-        window.TKroot.geometry(f"{width}x{height}+{x}+{y}")
+        self.values_text = QPlainTextEdit()
+        self.values_text.setFont(QFont('Helvetica', 16))
+        self.values_text.setReadOnly(True)
+        layout.addWidget(self.values_text)
 
-        return window
+        self.mean_label = QLabel('')
+        self.mean_label.setFont(QFont('Helvetica', 16))
+        layout.addWidget(self.mean_label)
 
-    def plot_flow_and_value(self, app):
-        # Create the window
-        app.flow_value = self.create_window()
-        app.windows.append(app.flow_value)
+        button_layout0 = QHBoxLayout()
 
-        if self.cur_query != app.query:
-            if not app.use_database and len(app.period[0]) == 10:
-                for area, area_data in app.query.items():
-                    self.db.area[area].partial_fulldate(app.period)
-            self.cur_query = copy.deepcopy(app.query)
+        calculate_button = QPushButton('Рассчитать')
+        calculate_button.clicked.connect(self.calculate)
+        button_layout0.addWidget(calculate_button)
+
+        save_button = QPushButton('Сохранить результаты')
+        save_button.clicked.connect(self.save_results)
+        button_layout0.addWidget(save_button)
+
+        layout.addLayout(button_layout0)
+
+        button_layout1 = QHBoxLayout()
+        self.button_home = QPushButton("Меню", self)
+        self.button_home.clicked.connect(self.return_to_main)
+        button_layout1.addWidget(self.button_home)
+
+        back_button = QPushButton('Назад')
+        back_button.clicked.connect(self.go_back)
+        button_layout1.addWidget(back_button)
+
+        next_button = QPushButton('Прогнозирование')
+        next_button.clicked.connect(self.go_to_next)
+        button_layout1.addWidget(next_button)
+
+        layout.addLayout(button_layout1)
+
+        widget.setLayout(layout)
+        self.setMinimumSize(600, 600)
+        self.resize(1280, 720)
+        self.center_window()
+
+    def center_window(self):
+        screen_geometry = self.screen().geometry()
+        x = (screen_geometry.width() - self.width()) // 2
+        y = (screen_geometry.height() - self.height()) // 2
+        self.move(x, y)
+
+    # Inside plot_flow_and_value method
+    def plot_flow_and_value(self):
+        self.show()
+
+        if self.cur_query != self.app.query:
+            if not self.use_db and len(self.app.period[0]) == 10:
+                for area, area_data in self.app.query.items():
+                    self.db.area[area].partial_fulldate(self.app.period)
+            self.cur_query = copy.deepcopy(self.app.query)
             self.calculated_values = None
-            # Get tourist flow
-            flow_data = []
+
+            self.area_flows = {}
             for area, area_data in self.cur_query.items():
                 area_flow = []
                 for date, date_data in area_data.items():
                     date_flow = self.db.area[area].date[date].tourist_flow
                     area_flow.append(date_flow)
-                flow_data.append(area_flow)
+                self.area_flows[area] = area_flow
 
-            self.flow = [sum(items) for items in zip(*flow_data)]
+            self.flow = [sum(items) for items in zip(*self.area_flows.values())]
+
+            # Clear old plots
+            self.plot_widget.clear()
+            self.plot_widget.addLegend()
 
             self.plot_created = False
-            self.ax.clear()
+            self.plot_widget.clear()
 
-        # Clear previous plot if it was created
         if self.plot_created:
-            self.ax.clear()  # Clear the axes
+            self.plot_widget.clear()
 
         if self.calculated_values is not None:
             calculated_values_text = '\n'.join(f"{value:.2f}" for value in self.calculated_values)
-            app.flow_value['-VALUES-'].update(calculated_values_text)
+            self.values_text.setPlainText(calculated_values_text)
 
             mean_value = np.mean(self.calculated_values)
-            app.flow_value['-MEAN-'].update(f"Общая оценка: {mean_value:.2f}")
+            self.mean_label.setText(f"Общая оценка: {mean_value:.2f}")
 
-        # Draw the new plot
-        self.ax.set_title('Оценка туристического потока')
-        self.ax.set_xlabel('Дата')
-        self.ax.set_ylabel('Туристический поток')
-        self.ax.plot(app.period, self.flow)
+        self.plot_widget.setTitle('Оценка туристического потока')
+        self.plot_widget.setLabel('bottom', text='Дата')
+        self.plot_widget.setLabel('left', text='Туристический поток')
 
-        if len(app.period[0]) == 10 or len(app.period) > 20:
-            # Set x-axis tick positions to display every 12th x-value
-            skip = int(len(app.period) / 6)
-            self.ax.set_xticks(app.period[::skip])
+        self.plot_widget.showGrid(x=True, y=True)
 
-        # Draw the plot on the canvas
-        canvas = FigureCanvasTkAgg(self.fig, master=app.flow_value['-CANVAS-'].TKCanvas)
-        canvas.draw()
-        canvas.get_tk_widget().pack(side='top', fill='both', expand=True)
+        # Convert date strings to datetime objects with correct format
+        # Set x-axis tick positions and labels
+        if len(self.app.period[0]) == 10:
+            x_axis_dates = [datetime.strptime(date, '%d-%m-%Y') for date in self.app.period]
+            self.plot_widget.getAxis('bottom').setTicks(
+                [[(i, date.strftime('%d-%m-%Y')) for i, date in enumerate(x_axis_dates)]])
+        elif len(self.app.period[0]) == 7:
+            x_axis_dates = [datetime.strptime(date, '%m-%Y') for date in self.app.period]
+            self.plot_widget.getAxis('bottom').setTicks(
+                [[(i, date.strftime('%m-%Y')) for i, date in enumerate(x_axis_dates)]])
+        else:
+            x_axis_dates = [datetime.strptime(date, '%Y') for date in self.app.period]
+            self.plot_widget.getAxis('bottom').setTicks(
+                [[(i, date.strftime('%Y')) for i, date in enumerate(x_axis_dates)]])
 
-        toolbar = NavigationToolbar2Tk(canvas, app.flow_value['-CANVAS-'].TKCanvas)
-        toolbar.update()
-        canvas.get_tk_widget().pack(side='top', fill='both', expand=True)
+        x_values = list(range(len(self.app.period)))
 
+        for i, (area, flow) in enumerate(self.area_flows.items()):
+            color = colors[i % len(colors)]
+            self.plot_widget.plot(x=x_values, y=flow, pen=mkPen(color=color, width=2), name=area)
+
+        # Plot the overall total flow line in red
+        if len(self.area_flows) > 1:
+            self.plot_widget.plot(x=x_values, y=self.flow, pen=mkPen(color='r', width=3), name='Общий поток')
         self.plot_created = True
 
-        # Event loop
-        while True:
-            event, values = app.flow_value.read()
+    def save_results(self):
+        if not self.calculated_values:
+            self.show_warning_message("Нет данных для сохранения.")
+            return
 
-            if event == sg.WINDOW_CLOSED or event == 'Выход':
-                break
+        # Ask user where to save
+        file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить результаты", "", "Text Files (*.txt)")
+        if file_path:
+            # Save textual results
+            try:
+                with open(file_path, 'w', encoding='utf-8') as file:
+                    file.write(self.values_text.toPlainText())
+                    file.write('\n' + ('_' * 80) + '\n')
+                    file.write(self.mean_label.text())
+            except Exception as e:
+                self.show_warning_message(f"Ошибка при сохранении файла: {str(e)}")
+                return
 
-            elif event == "Назад":
-                app.flow_value.hide()
-                app.run_factor_selector()
+            # Try saving plot image
+            try:
+                exporter = ImageExporter(self.plot_widget.plotItem)
+                image_path = file_path.rsplit('.', 1)[0] + '.png'
+                exporter.export(image_path)
+            except Exception as e:
+                self.show_warning_message(f"Текст сохранён, но ошибка при сохранении графика: {str(e)}")
+                return
 
-            elif event == "Далее":
-                app.tourist_flow = self.flow
-                app.db = self.db
-                app.flow_value.hide()
-                app.run_setup_forecast()
+            QMessageBox.information(self, "Сохранение завершено", "Результаты и график успешно сохранены.")
 
-            if event == '-CALCULATE-':
-                if self.calculated_values is None:
-                    # Perform calculations
-                    factor_sums = {}
-                    for area, area_data in self.cur_query.items():
-                        if area not in factor_sums:
-                            factor_sums[area] = {}
+    def return_to_main(self):
+        self.hide()
+        self.app.run_start_menu()
 
-                        for date, date_data in area_data.items():
-                            if date not in factor_sums[area]:
-                                factor_sums[area][date] = {}
+    def go_back(self):
+        self.hide()
+        self.app.run_factor_selector()
 
-                            for factor, factor_data in date_data.items():
-                                if factor not in factor_sums[area][date]:
-                                    factor_sums[area][date][factor] = 1.0
+    def go_to_next(self):
+        self.app.tourist_flow = self.flow
+        self.app.area_flows = self.area_flows
+        self.app.db = self.db
+        self.hide()
+        self.app.run_setup_forecast()
 
-                                for subfactor in factor_data:
-                                    value = self.db.area[area].date[date].factors[factor][subfactor]
-                                    factor_sums[area][date][factor] += float(value)
+    def calculate(self):
+        if self.cur_query is None or len(self.cur_query) == 0:
+            self.show_warning_message("Нет данных для расчета")
+            return
 
-                    values = []
-                    for area, area_data in factor_sums.items():
-                        area_value = []
-                        for date, date_data in area_data.items():
-                            date_value = []
-                            for factor, sum_value in date_data.items():
-                                date_value.append(sum_value)
-                            area_value.append(date_value)
-                        values.append(area_value)
+        factor_sums = {}  # area -> date -> factor -> segment value
+        factor_details = {}  # area -> date -> factor -> subfactor -> value
 
-                    factors_mean = [list(map(lambda x: sum(x) / len(x), zip(*sublists))) for sublists in zip(*values)]
+        # Collect subfactor values and segment products
+        for area, area_data in self.cur_query.items():
+            if area not in factor_sums:
+                factor_sums[area] = {}
+                factor_details[area] = {}
 
-                    self.calculated_values = []
-                    for factor_values in factors_mean:
-                        ti_value = factor_values[0] ** self.alpha
-                        as_value = factor_values[1] ** self.beta
-                        lr_value = factor_values[2] ** self.gamma
-                        fs_value = factor_values[3] ** self.phi
-                        of_value = factor_values[4] ** self.omega
+            for date, date_data in area_data.items():
+                if date not in factor_sums[area]:
+                    factor_sums[area][date] = {}
+                    factor_details[area][date] = {}
 
-                        score = ti_value * as_value * lr_value * fs_value * of_value
-                        self.calculated_values.append(round(score ** (1 / 5), 2))
+                for factor, subfactors in date_data.items():
+                    product = 1.0
+                    factor_details[area][date][factor] = {}
 
-                calculated_values_text = '\n'.join(f"{value:.2f}" for value in self.calculated_values)
-                app.flow_value['-VALUES-'].update(calculated_values_text)
+                    for subfactor in subfactors:
+                        value = float(self.db.area[area].date[date].factors[factor][subfactor])
+                        product += value
+                        factor_details[area][date][factor][subfactor] = value
 
-                mean_value = np.mean(self.calculated_values)
-                app.flow_value['-MEAN-'].update(f"Общая оценка: {mean_value:.2f}")
+                    factor_sums[area][date][factor] = product
 
-        # Close the window
-        app.close()
+        # Calculate scores per area
+        area_scores = {}
+        text_lines = []
+
+        for area, date_data in factor_sums.items():
+            area_scores[area] = []
+            text_lines.append('_' * 80)
+            text_lines.append(area)
+            text_lines.append('_' * 80)
+
+            for date, factor_data in date_data.items():
+                if len(factor_data) != 5:
+                    self.show_warning_message(f"Недостаточно факторов для {area} на дату {date}")
+                    return
+                try:
+                    ti = factor_data['Транспортный сегмент'] ** self.alpha
+                    ac = factor_data['Сегмент размещения'] ** self.beta
+                    lr = factor_data['Сегмент отдыха и развлечений'] ** self.gamma
+                    fs = factor_data['Пищевой сегмент'] ** self.phi
+                    of = factor_data['Другие факторы'] ** self.omega
+
+                    score = (ti * ac * lr * fs * of) ** (1 / 5)
+                    final_score = round(score, 2)
+                except KeyError as e:
+                    self.show_warning_message(f"Отсутствует фактор {e} для {area} на дату {date}")
+                    return
+
+                area_scores[area].append(final_score)
+
+                # Start result line
+                text_lines.append(f"{date} - {area} - Общая оценка: {final_score:.2f};")
+
+                # Add segment values
+                for factor_code, segment_value in factor_data.items():
+                    text_lines.append(f"  {factor_code} - Оценка сегмента: {round(segment_value, 2)};")
+                    for subfactor_name, val in factor_details[area][date][factor_code].items():
+                        text_lines.append(f"    {factor_code} - {subfactor_name} - Оценка фактора: {val:.2f};")
+
+        self.calculated_values = area_scores
+
+        # Add combined score if multiple areas
+        if len(area_scores) > 1:
+            text_lines.append('_' * 80)
+            text_lines.append('Общий поток')
+            text_lines.append('_' * 80)
+            combined_scores = []
+            for i in range(len(self.app.period)):
+                values_at_i = [scores[i] for scores in area_scores.values()]
+                combined_score = round(np.mean(values_at_i), 2)
+                combined_scores.append(combined_score)
+                text_lines.append(f"{self.app.period[i]} - Общий поток - Общая оценка: {combined_score:.2f};")
+            self.calculated_values['Общий'] = combined_scores
+
+            mean_value = np.mean(combined_scores)
+        else:
+            only_area = next(iter(area_scores))
+            mean_value = np.mean(area_scores[only_area])
+
+        self.values_text.setPlainText('\n'.join(text_lines))
+        self.mean_label.setText(f"Общая оценка: {mean_value:.2f}")
+
+    def show_warning_message(self, message):
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Предупреждение")
+
+        font = QFont()
+        font.setPointSize(12)
+        font.setBold(True)
+        msg_box.setFont(font)
+
+        msg_label = QLabel(message)
+        msg_label.setFont(font)
+        msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg_box.layout().addWidget(msg_label, 0, 0, 1, msg_box.layout().columnCount(), Qt.AlignmentFlag.AlignCenter)
+
+        msg_box.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg_box.exec()  # Note the use of exec_() instead of exec()
+
+    def closeEvent(self, event):
+        self.app.close()
