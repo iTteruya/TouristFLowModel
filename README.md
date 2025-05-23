@@ -6,7 +6,10 @@
 Software Implementation of a Tourist Flow Model using Python
 
 ## About
-- add later
+The main functionalities of this model are:
+- Scoring the influence of factors on tourist flow
+- Forecasting future tourist flow
+- Analyzing forecast results and providing recommendations using LLM
 
 ## Getting started
 First, clone this repository:
